@@ -2,10 +2,35 @@
 
 import logging
 import os
+from urllib.parse import urlparse
 
 from .urls import is_atlassian_cloud_url
 
 logger = logging.getLogger("mcp-atlassian.utils.environment")
+
+
+def get_data_center_oauth_product() -> str | None:
+    """Infer a dedicated Data Center OAuth product from the public URL."""
+    public_base_url = os.getenv("PUBLIC_BASE_URL", "")
+    path_parts = {
+        part.lower()
+        for part in urlparse(public_base_url).path.split("/")
+        if part
+    }
+    matches = path_parts.intersection({"jira", "confluence"})
+    if len(matches) > 1:
+        raise ValueError(
+            "PUBLIC_BASE_URL must identify only one OAuth product: "
+            "'/jira' or '/confluence'"
+        )
+    product = next(iter(matches), None)
+    if not product:
+        return None
+
+    product_url = os.getenv(f"{product.upper()}_URL")
+    if not product_url or is_atlassian_cloud_url(product_url):
+        return None
+    return product
 
 
 def _get_oauth_env(service_type: str, name: str) -> str | None:
@@ -249,6 +274,18 @@ def get_available_services(
             logger.info(
                 "Using Jira personal token and URL from headers for Xray for Jira."
             )
+
+    oauth_product = get_data_center_oauth_product()
+    oauth_proxy_enabled = os.getenv(
+        "ATLASSIAN_OAUTH_PROXY_ENABLE", ""
+    ).lower() in ("true", "1", "yes")
+    if oauth_proxy_enabled and oauth_product == "jira":
+        confluence_is_setup = False
+        bitbucket_is_setup = False
+    elif oauth_proxy_enabled and oauth_product == "confluence":
+        jira_is_setup = False
+        bitbucket_is_setup = False
+        xray_is_setup = False
 
     # Log setup status
     if not confluence_is_setup:

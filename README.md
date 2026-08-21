@@ -72,15 +72,17 @@ MCP Atlassian supports four authentication methods:
 
 1. Go to [Atlassian Developer Console](https://developer.atlassian.com/console/myapps/).
 2. Create an "OAuth 2.0 (3LO) integration" app.
-3. Configure Jira/Confluence scopes and a callback URL.
-4. Run the setup wizard and leave the Data Center instance URL blank:
+3. Configure **Permissions** (scopes) for Jira/Confluence
+4. Run the Cloud setup wizard:
    ```bash
    docker run --rm -i \
      -p 8080:8080 \
      -v "${HOME}/.mcp-atlassian:/home/app/.mcp-atlassian" \
      ghcr.io/SharkyND/mcp-atlassian:latest --oauth-setup -v
    ```
-5. Complete browser authorization and add the resulting values to `.env` or your IDE configuration:
+6. Follow prompts for `Client ID`, `Secret`, `URI`, and `Scope`
+7. Complete browser authorization
+8. Add obtained credentials to `.env` or IDE config:
    - `ATLASSIAN_OAUTH_CLOUD_ID` (from wizard)
    - `ATLASSIAN_OAUTH_CLIENT_ID`
    - `ATLASSIAN_OAUTH_CLIENT_SECRET`
@@ -196,6 +198,16 @@ JIRA_OAUTH_SCOPE=WRITE
 ATLASSIAN_OAUTH_ALLOWED_CLIENT_REDIRECT_URIS=http://127.0.0.1:*,http://localhost:*
 ```
 
+Start the Jira process on its own internal port:
+
+```bash
+uv run mcp-atlassian \
+  --transport streamable-http \
+  --host 0.0.0.0 \
+  --port 8001 \
+  --auth-mode oauth
+```
+
 **Confluence Data Center browser OAuth instance:**
 
 Register `https://mcp.example.com/confluence/oauth/callback` in the Confluence
@@ -213,12 +225,25 @@ CONFLUENCE_OAUTH_SCOPE=WRITE
 ATLASSIAN_OAUTH_ALLOWED_CLIENT_REDIRECT_URIS=http://127.0.0.1:*,http://localhost:*
 ```
 
+Start the Confluence process on a different internal port:
+
+```bash
+uv run mcp-atlassian \
+  --transport streamable-http \
+  --host 0.0.0.0 \
+  --port 8002 \
+  --auth-mode oauth
+```
+
 > [!NOTE]
 > Separate `/jira/*` and `/confluence/*` endpoints are a recommended deployment
 > pattern, not built-in multi-provider routing in the current server. To use
 > this pattern, run two server processes and configure an ingress or reverse
 > proxy to route and, when necessary, rewrite each public prefix to the matching
-> process. Each process must use a separate persistent FastMCP data directory.
+> process. For example, strip `/jira` before forwarding to port 8001 and strip
+> `/confluence` before forwarding to port 8002. Each process must use a separate
+> persistent FastMCP data directory.
+
 
 After that external routing is configured, clients can connect to both
 deployments without product-selection headers:
@@ -239,30 +264,29 @@ deployments without product-selection headers:
 ```
 
 Do not configure both Data Center incoming application links in one browser
-OAuth process. The current process creates one upstream OAuth provider and
-selects only one instance URL, client credential set, callback, and scope set.
-Also avoid mixing shared `ATLASSIAN_OAUTH_*` credentials with product-specific
-credentials in these processes because shared values are selected first by the
-remote OAuth proxy.
+OAuth process. Each process creates one upstream OAuth provider.
+The `/jira` or `/confluence` path in `PUBLIC_BASE_URL` selects the matching
+product URL, hides the other product's tools, and prevents credentials from the
+other product from being selected. If both Data Center URLs are configured
+without one of those public URL prefixes, startup fails closed.
 
-**Current remote browser OAuth precedence:**
+**Remote browser OAuth product selection:**
 
-The first non-empty value in each row is selected independently:
+With a `/jira` public base URL, the process requires `JIRA_URL` and checks
+Jira's OAuth value before the corresponding shared default. With a
+`/confluence` public base URL, it requires `CONFLUENCE_URL` and follows the
+same rule:
 
-| Setting | Precedence, highest to lowest |
+| Setting | Jira process | Confluence process |
 |---|---|
-| Instance URL | `ATLASSIAN_OAUTH_INSTANCE_URL`, `JIRA_URL`, `CONFLUENCE_URL` |
-| Client ID | `ATLASSIAN_OAUTH_CLIENT_ID`, `JIRA_OAUTH_CLIENT_ID`, `CONFLUENCE_OAUTH_CLIENT_ID` |
-| Client secret | `ATLASSIAN_OAUTH_CLIENT_SECRET`, `JIRA_OAUTH_CLIENT_SECRET`, `CONFLUENCE_OAUTH_CLIENT_SECRET` |
-| Redirect URI | `ATLASSIAN_OAUTH_REDIRECT_URI`, `JIRA_OAUTH_REDIRECT_URI`, `CONFLUENCE_OAUTH_REDIRECT_URI` |
-| Scope | `ATLASSIAN_OAUTH_SCOPE`, `JIRA_OAUTH_SCOPE`, `CONFLUENCE_OAUTH_SCOPE` |
+| Instance URL | `JIRA_URL` | `CONFLUENCE_URL` |
+| Client ID | `JIRA_OAUTH_CLIENT_ID`, then `ATLASSIAN_OAUTH_CLIENT_ID` | `CONFLUENCE_OAUTH_CLIENT_ID`, then `ATLASSIAN_OAUTH_CLIENT_ID` |
+| Client secret | `JIRA_OAUTH_CLIENT_SECRET`, then shared | `CONFLUENCE_OAUTH_CLIENT_SECRET`, then shared |
+| Redirect URI | `JIRA_OAUTH_REDIRECT_URI`, then shared | `CONFLUENCE_OAUTH_REDIRECT_URI`, then shared |
+| Scope | `JIRA_OAUTH_SCOPE`, then shared | `CONFLUENCE_OAUTH_SCOPE`, then shared |
 
-Because these settings are selected independently, mixed Jira and Confluence
-values can produce an invalid OAuth configuration. For a Jira DC process, set
-only the Jira URL and Jira OAuth variables. For a Confluence DC process, set
-only the Confluence URL and Confluence OAuth variables. Use shared
-`ATLASSIAN_OAUTH_*` values only for a deliberately shared configuration, such
-as Jira and Confluence Cloud on the same Atlassian site.
+The product path is optional for deliberately shared configurations such as
+one Atlassian Cloud OAuth application with combined Jira and Confluence scopes.
 
 
 
@@ -271,8 +295,8 @@ as Jira and Confluence Cloud on the same Atlassian site.
 1. In the product administration (Jira, Confluence, or Bitbucket), create an incoming application link for this client.
 2. Configure its redirect URI and permissions/scopes (see scope details below).
 3. Use HTTPS for production instance and redirect URLs. Atlassian permits HTTP in development only when the corresponding product system properties allow it.
-4. Run `mcp-atlassian --oauth-setup -v` and enter the Data Center instance URL when prompted.
-5. Set the corresponding product URL (`JIRA_URL`, `CONFLUENCE_URL`, or `BITBUCKET_URL`) to that instance URL, plus the OAuth credentials.
+4. Configure the dedicated Jira or Confluence browser OAuth process as shown above, including its product URL, OAuth credentials, `PUBLIC_BASE_URL`, and callback.
+5. Start it with `--auth-mode oauth`. 
 
 **Data Center OAuth Scopes by Product:**
 
@@ -308,18 +332,21 @@ Each Data Center product normally has its own incoming application link. Use pro
 - Confluence: `CONFLUENCE_OAUTH_CLIENT_ID`, `CONFLUENCE_OAUTH_CLIENT_SECRET`, `CONFLUENCE_OAUTH_REDIRECT_URI`, `CONFLUENCE_OAUTH_SCOPE`
 - Bitbucket: `BITBUCKET_OAUTH_CLIENT_ID`, `BITBUCKET_OAUTH_CLIENT_SECRET`, `BITBUCKET_OAUTH_REDIRECT_URI`, `BITBUCKET_OAUTH_SCOPE`
 
-For the setup wizard, select the intended instance and its matching credential
-set for each run. For remote browser OAuth, shared `ATLASSIAN_OAUTH_*` values are
-selected before product-specific values; do not set both forms in the same
-process unless the shared values are intentionally authoritative.
+For remote Data Center browser OAuth, use `PUBLIC_BASE_URL` ending in `/jira`
+or `/confluence`; product-specific OAuth values override shared defaults in the
+selected process.
 
-Data Center access and refresh tokens are issued by the instance at `/rest/oauth2/latest/token`. If the instance does not issue a refresh token, the access token remains usable until expiry and then the setup flow must be repeated.
+Data Center access and refresh tokens are issued by the instance at
+`/rest/oauth2/latest/token`. If the instance does not issue a refresh token,
+the MCP client must start browser authorization again after the access token
+expires.
 
 
 Start the server with:
 
 ```bash
-uv run mcp-atlassian --transport streamable-http --port 8889 --auth-mode oauth
+uv run mcp-atlassian --transport streamable-http --port 8889 \
+  --auth-mode oauth
 ```
 
 <details>
@@ -571,7 +598,7 @@ For Server/Data Center deployments, use direct variable passing:
 
 These examples show how to configure `mcp-atlassian` in an MCP client when using OAuth 2.0 for Atlassian Cloud or Data Center.
 
-**Example for Standard OAuth 2.0 Flow (using Setup Wizard):**
+**Cloud OAuth 2.0 Flow (using Setup Wizard):**
 
 This configuration is for when you use the server's built-in OAuth client and have completed the [OAuth setup wizard](#c-oauth-20-authentication-cloud---advanced).
 
@@ -615,48 +642,8 @@ This configuration is for when you use the server's built-in OAuth client and ha
 >   - `JIRA_URL` and `CONFLUENCE_URL` for your Cloud instances are always required.
 >   - The volume mount (`-v .../.mcp-atlassian:/home/app/.mcp-atlassian`) is crucial for persisting the OAuth tokens obtained by the wizard, enabling automatic refresh.
 
-**Data Center example with separate Jira and Confluence incoming links:**
-
-```json
-{
-  "mcpServers": {
-    "mcp-atlassian": {
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "-v", "<path_to_your_home>/.mcp-atlassian:/home/app/.mcp-atlassian",
-        "-e", "JIRA_URL",
-        "-e", "CONFLUENCE_URL",
-        "-e", "JIRA_OAUTH_CLIENT_ID",
-        "-e", "JIRA_OAUTH_CLIENT_SECRET",
-        "-e", "JIRA_OAUTH_REDIRECT_URI",
-        "-e", "JIRA_OAUTH_SCOPE",
-        "-e", "CONFLUENCE_OAUTH_CLIENT_ID",
-        "-e", "CONFLUENCE_OAUTH_CLIENT_SECRET",
-        "-e", "CONFLUENCE_OAUTH_REDIRECT_URI",
-        "-e", "CONFLUENCE_OAUTH_SCOPE",
-        "ghcr.io/SharkyND/mcp-atlassian:latest"
-      ],
-      "env": {
-        "JIRA_URL": "https://jira.example.com",
-        "CONFLUENCE_URL": "https://confluence.example.com",
-        "JIRA_OAUTH_CLIENT_ID": "YOUR_JIRA_INCOMING_LINK_CLIENT_ID",
-        "JIRA_OAUTH_CLIENT_SECRET": "YOUR_JIRA_INCOMING_LINK_SECRET",
-        "JIRA_OAUTH_REDIRECT_URI": "http://localhost:8080/callback",
-        "JIRA_OAUTH_SCOPE": "WRITE",
-        "CONFLUENCE_OAUTH_CLIENT_ID": "YOUR_CONFLUENCE_INCOMING_LINK_CLIENT_ID",
-        "CONFLUENCE_OAUTH_CLIENT_SECRET": "YOUR_CONFLUENCE_INCOMING_LINK_SECRET",
-        "CONFLUENCE_OAUTH_REDIRECT_URI": "http://localhost:8080/callback",
-        "CONFLUENCE_OAUTH_SCOPE": "WRITE"
-      }
-    }
-  }
-}
-```
-
-Run the setup wizard once per incoming link. Before each run, set `ATLASSIAN_OAUTH_INSTANCE_URL` and the matching client credentials. Data Center does not use `ATLASSIAN_OAUTH_CLOUD_ID`.
+For Data Center, use the remote browser OAuth deployment described earlier in
+this guide. It uses `--auth-mode oauth` and does not require the setup wizard.
 
 **Example for Pre-existing Access Token (BYOT - Bring Your Own Token):**
 
