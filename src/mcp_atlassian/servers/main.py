@@ -1600,6 +1600,24 @@ class MultiProductDataCenterMCP(AtlassianMCP):
         super().__init__(name="Atlassian Data Center MCP")
         self.product_servers = product_servers
 
+    def _root_alias_product(self) -> str | None:
+        """Return the product whose metadata is also served at the origin root.
+
+        Clients such as VS Code fall back to origin-level discovery paths that
+        drop the product path segment.
+        """
+        configured = os.getenv("OAUTH_ROOT_PRODUCT", "").strip().lower()
+        if configured:
+            if configured not in self.product_servers:
+                raise ValueError(
+                    f"OAUTH_ROOT_PRODUCT='{configured}' is not a configured Data "
+                    f"Center OAuth product: {', '.join(self.product_servers)}"
+                )
+            return configured
+        if len(self.product_servers) == 1:
+            return next(iter(self.product_servers))
+        return None
+
     def http_app(
         self,
         path: str | None = None,
@@ -1615,6 +1633,7 @@ class MultiProductDataCenterMCP(AtlassianMCP):
 
         mcp_path = path or settings.streamable_http_path
         product_apps: dict[str, Starlette] = {}
+        protected_metadata_paths: dict[str, str] = {}
         routes: list[Route | Mount] = [
             Route("/healthz", _health_check_route, methods=["GET"]),
             Route("/readyz", _ready_check_route, methods=["GET"]),
@@ -1637,6 +1656,7 @@ class MultiProductDataCenterMCP(AtlassianMCP):
                     "/.well-known/oauth-protected-resource/"
                 )
             )
+            protected_metadata_paths[product] = protected_metadata_path
             routes.append(
                 _copy_route(
                     product_app,
@@ -1651,6 +1671,30 @@ class MultiProductDataCenterMCP(AtlassianMCP):
                     f"/.well-known/oauth-authorization-server/{product}",
                 )
             )
+
+        root_alias_product = self._root_alias_product()
+        if root_alias_product is not None:
+            alias_app = product_apps[root_alias_product]
+            routes.append(
+                _copy_route(
+                    alias_app,
+                    "/.well-known/oauth-authorization-server",
+                    "/.well-known/oauth-authorization-server",
+                )
+            )
+            for alias_path in (
+                "/.well-known/oauth-protected-resource",
+                f"/.well-known/oauth-protected-resource{mcp_path}",
+            ):
+                if alias_path == protected_metadata_paths[root_alias_product]:
+                    continue
+                routes.append(
+                    _copy_route(
+                        alias_app,
+                        protected_metadata_paths[root_alias_product],
+                        alias_path,
+                    )
+                )
 
         routes.extend(
             Mount(f"/{product}", app=product_app)

@@ -131,13 +131,22 @@ uv run mcp-atlassian \
 ```
 
 The reverse proxy must preserve the original HTTPS host and scheme, including
-`Host` and `X-Forwarded-Proto`, and route these paths to the same server:
+`Host` and `X-Forwarded-Proto`. Each configured Data Center product is served
+under its own path prefix (`jira`, `confluence`, or `bitbucket`), so route the
+whole origin to the same server. For a Jira deployment the paths are:
 
-- `/mcp`
-- `/authorize`, `/token`, `/register`, and `/consent`
-- `/oauth/callback`
-- `/.well-known/oauth-authorization-server`
-- `/.well-known/oauth-protected-resource/mcp`
+- `/jira/mcp`
+- `/jira/authorize`, `/jira/token`, `/jira/register`, and `/jira/consent`
+- `/jira/oauth/callback`
+- `/.well-known/oauth-authorization-server/jira`
+- `/.well-known/oauth-protected-resource/jira/mcp`
+
+When exactly one product is configured, the same metadata is also served at the
+origin-root paths `/.well-known/oauth-authorization-server`,
+`/.well-known/oauth-protected-resource`, and
+`/.well-known/oauth-protected-resource/mcp` for clients that discover at the
+origin. With several products configured, set `OAUTH_ROOT_PRODUCT` to choose
+which product answers those root paths.
 
 Configure VS Code or another HTTP MCP client with the public MCP endpoint. Do
 not add an `Authorization` header; the client obtains and manages it through
@@ -148,7 +157,7 @@ OAuth discovery.
   "servers": {
     "atlassian-production": {
       "type": "http",
-      "url": "https://mcp.example.com/mcp"
+      "url": "https://mcp.example.com/jira/mcp"
     }
   }
 }
@@ -156,7 +165,7 @@ OAuth discovery.
 
 During login, two different callbacks are expected:
 
-- `https://mcp.example.com/oauth/callback` is the fixed Atlassian-to-server
+- `https://mcp.example.com/jira/oauth/callback` is the fixed Atlassian-to-server
   callback registered in the Atlassian OAuth application.
 - `http://127.0.0.1:<random-port>/` is a temporary MCP-client callback selected
   by VS Code. Do not register this random port with Atlassian. The server only

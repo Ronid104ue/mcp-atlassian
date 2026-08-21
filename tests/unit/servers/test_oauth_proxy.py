@@ -292,6 +292,37 @@ def test_multi_product_dc_oauth_exposes_independent_discovery(
     )
 
 
+def test_single_product_dc_oauth_serves_origin_root_discovery(monkeypatch, tmp_path):
+    from fastmcp import settings
+
+    monkeypatch.setattr(settings, "home", tmp_path)
+    monkeypatch.setenv("ATLASSIAN_OAUTH_PROXY_ENABLE", "true")
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://mcp.example.com")
+    monkeypatch.setenv("JIRA_URL", "https://jira.example.com")
+    monkeypatch.setenv("JIRA_OAUTH_CLIENT_ID", "jira-client")
+    monkeypatch.setenv("JIRA_OAUTH_CLIENT_SECRET", "jira-secret")
+    monkeypatch.setenv(
+        "JIRA_OAUTH_REDIRECT_URI",
+        "https://mcp.example.com/jira/oauth/callback",
+    )
+    monkeypatch.setenv("JIRA_OAUTH_SCOPE", "WRITE")
+
+    app = _build_main_mcp().http_app(path="/mcp", transport="streamable-http")
+
+    with TestClient(app, base_url="https://mcp.example.com") as client:
+        root_authorization = client.get("/.well-known/oauth-authorization-server")
+        root_resource = client.get("/.well-known/oauth-protected-resource")
+        legacy_resource = client.get("/.well-known/oauth-protected-resource/mcp")
+
+    assert root_authorization.status_code == 200
+    assert root_authorization.json()["registration_endpoint"] == (
+        "https://mcp.example.com/jira/register"
+    )
+    assert root_resource.status_code == 200
+    assert root_resource.json()["resource"] == "https://mcp.example.com/jira/mcp"
+    assert legacy_resource.status_code == 200
+
+
 def test_multi_product_dc_oauth_has_no_ambiguous_root_mcp(monkeypatch, tmp_path):
     _set_multi_product_dc_oauth_env(monkeypatch, tmp_path)
     app = _build_main_mcp().http_app(path="/mcp", transport="streamable-http")
