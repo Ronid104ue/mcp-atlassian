@@ -354,10 +354,16 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict]:
     if services.get("bitbucket"):
         try:
             bitbucket_config = BitbucketConfig.from_env()
-            loaded_bitbucket_config = bitbucket_config
-            logger.info(
-                "Bitbucket configuration loaded and authentication is configured."
-            )
+            if bitbucket_config.is_auth_configured():
+                loaded_bitbucket_config = bitbucket_config
+                logger.info(
+                    "Bitbucket configuration loaded and authentication is configured."
+                )
+            else:
+                logger.warning(
+                    "Bitbucket URL found, but authentication is not fully configured. "
+                    "Bitbucket tools will be unavailable."
+                )
         except Exception as e:
             logger.error(f"Failed to load Bitbucket configuration: {e}", exc_info=True)
     if services.get("xray"):

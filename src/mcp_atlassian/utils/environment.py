@@ -55,7 +55,10 @@ def get_available_services(
             logger.info("Using Confluence Data Center browser OAuth")
         elif is_cloud and _is_cloud_oauth_configured():
             confluence_is_setup = True
-            logger.info("Using Confluence OAuth 2.0 authentication (Cloud)")
+            logger.info(
+                "Using Confluence OAuth 2.0 (3LO) authentication "
+                "(Cloud-only features)"
+            )
         elif is_cloud:  # Cloud non-OAuth
             if all(
                 [
@@ -105,7 +108,9 @@ def get_available_services(
             logger.info("Using Jira Data Center browser OAuth")
         elif is_cloud and _is_cloud_oauth_configured():
             jira_is_setup = True
-            logger.info("Using Jira OAuth 2.0 authentication (Cloud)")
+            logger.info(
+                "Using Jira OAuth 2.0 (3LO) authentication (Cloud-only features)"
+            )
         elif is_cloud:  # Cloud non-OAuth
             if all(
                 [
@@ -154,7 +159,10 @@ def get_available_services(
             logger.info("Using Bitbucket Data Center browser OAuth")
         elif is_cloud and _is_cloud_oauth_configured():
             bitbucket_is_setup = True
-            logger.info("Using Bitbucket OAuth 2.0 authentication (Cloud)")
+            logger.info(
+                "Using Bitbucket OAuth 2.0 (3LO) authentication "
+                "(Cloud-only features)"
+            )
         elif is_cloud:  # Cloud non-OAuth
             if all(
                 [
